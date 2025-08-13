@@ -1,5 +1,7 @@
 package raft
 
+import "time"
+
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
 type RequestVoteArgs struct {
@@ -24,6 +26,13 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	persistStateChanged := false
+	defer func() {
+		if persistStateChanged {
+			rf.persist()
+		}
+	}()
+
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
 		reply.VoteGranted = false
@@ -31,9 +40,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 
 	if args.Term > rf.currentTerm {
-		rf.state = Follower
-		rf.currentTerm = args.Term
-		rf.votedFor = -1
+		rf.convertToFollower(args.Term)
+		persistStateChanged = true
 	}
 
 	reply.Term = rf.currentTerm
@@ -45,6 +53,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.VoteGranted = true
 		rf.votedFor = args.CandidateId
 		rf.sendToChannel(rf.heartbeatCh)
+		persistStateChanged = true
 	}
 }
 
@@ -76,7 +85,11 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 // that the caller passes the address of the reply struct with &, not
 // the struct itself.
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) {
-	if ok := rf.peers[server].Call("Raft.RequestVote", args, reply); !ok {
+	ok := false
+	for nTry := 0; !ok && nTry < 5; ok, nTry = rf.peers[server].Call("Raft.RequestVote", args, reply), nTry+1 {
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !ok {
 		return
 	}
 
@@ -88,6 +101,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	}
 	if reply.Term > rf.currentTerm {
 		rf.convertToFollower(reply.Term)
+		rf.persist()
 		return
 	}
 	if reply.VoteGranted {

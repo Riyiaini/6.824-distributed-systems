@@ -9,12 +9,14 @@ package raft
 import (
 	//	"bytes"
 
+	"bytes"
 	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	//	"6.5840/labgob"
+	"6.5840/labgob"
 	"6.5840/labrpc"
 	"6.5840/raftapi"
 	tester "6.5840/tester1"
@@ -87,32 +89,32 @@ func (rf *Raft) GetState() (int, bool) {
 func (rf *Raft) persist() {
 	// Your code here (3C).
 	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// raftstate := w.Bytes()
-	// rf.persister.Save(raftstate, nil)
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.log)
+	raftstate := w.Bytes()
+	rf.persister.Save(raftstate, nil)
 }
 
 // restore previously persisted state.
 func (rf *Raft) readPersist(data []byte) {
-	if data == nil || len(data) < 1 { // bootstrap without any state?
+	if len(data) < 1 { // bootstrap without any state?
 		return
 	}
 	// Your code here (3C).
 	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	var cTerm int
+	var vtFor int
+	var logs []logEntry
+	if d.Decode(&cTerm) == nil && d.Decode(&vtFor) == nil && d.Decode(&logs) == nil {
+		rf.currentTerm = cTerm
+		rf.votedFor = vtFor
+		rf.log = logs
+	}
 }
 
 // how many bytes in Raft's persisted log?
@@ -145,7 +147,7 @@ func heartbeatTimeout() time.Duration {
 }
 
 func electionTimeout() time.Duration {
-	ms := 300 + (rand.Int63() % 300)
+	ms := 300 + (rand.Int63() % 200)
 	return time.Duration(ms) * time.Millisecond
 }
 
@@ -189,6 +191,7 @@ func (rf *Raft) convertToCandidate() {
 	rf.currentTerm++
 	rf.votedFor = rf.me
 	rf.voteCount = 1 // vote for itself
+	rf.persist()
 
 	rf.broadcastRequestVote()
 }
@@ -261,6 +264,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		Term:    term,
 		Command: command,
 	})
+	rf.persist()
 
 	return rf.GetLastIndex(), term, true
 }
@@ -337,7 +341,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		me:          me,
 		currentTerm: 0,
 		votedFor:    -1,
-		log:         make([]logEntry, 1), // fisrt index is 1
+		log:         make([]logEntry, 0), // fisrt index is 1
 		commitIndex: 0,
 		lastApplied: 0,
 		nextIndex:   make([]int, len(peers)),
@@ -352,7 +356,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	}
 
 	// Your initialization code here (3A, 3B, 3C).
-	rf.log[0] = logEntry{0, nil}
+	rf.log = append(rf.log, logEntry{0, nil})
 	for i := range rf.peers {
 		rf.nextIndex[i], rf.matchIndex[i] = rf.GetLastIndex()+1, 0
 	}

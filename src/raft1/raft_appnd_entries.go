@@ -1,6 +1,10 @@
 package raft
 
-import "6.5840/raftapi"
+import (
+	"time"
+
+	"6.5840/raftapi"
+)
 
 type AppendEntryArgs struct {
 	Term         int
@@ -11,10 +15,10 @@ type AppendEntryArgs struct {
 	LeaderCommit int
 }
 type AppendEntryReply struct {
-	Term         int
-	NextIndex    int
-	ConflictTerm int
-	Success      bool
+	Term    int
+	XIndex  int
+	XTerm   int
+	Success bool
 }
 
 func (rf *Raft) applyLogEntry() {
@@ -36,6 +40,13 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	persistStateChanged := false
+	defer func() {
+		if persistStateChanged {
+			rf.persist()
+		}
+	}()
+
 	reply.Success = false
 
 	if args.Term < rf.currentTerm {
@@ -45,6 +56,7 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 
 	if args.Term > rf.currentTerm {
 		rf.convertToFollower(args.Term)
+		persistStateChanged = true
 	}
 
 	reply.Term = rf.currentTerm
@@ -53,8 +65,8 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 	// follower's log is shorter than leader's log
 	lastIndex := rf.GetLastIndex()
 	if args.PrevLogIndex > lastIndex {
-		reply.NextIndex = lastIndex + 1
-		reply.ConflictTerm = -1
+		reply.XIndex = lastIndex + 1
+		reply.XTerm = -1
 		return
 	}
 
@@ -64,12 +76,12 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 		for cfIndex > 0 && rf.log[cfIndex].Term == cfTerm {
 			cfIndex--
 		}
-		reply.NextIndex = cfIndex + 1
-		reply.ConflictTerm = cfTerm
+		reply.XIndex = cfIndex + 1
+		reply.XTerm = cfTerm
 		return
 	}
 
-	// By this point, follower's log is consistent with leader's log before PrevLogIndex
+	// By this point, follower's log before PrevLogIndex is consistent with leader's
 
 	i, j := args.PrevLogIndex+1, 0
 	for ; i <= lastIndex && j < len(args.Entries); i, j = i+1, j+1 {
@@ -79,8 +91,11 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 	}
 	rf.log = rf.log[:i]
 	rf.log = append(rf.log, args.Entries[j:]...)
-	reply.ConflictTerm = -1
-	reply.NextIndex = len(rf.log)
+	if i <= lastIndex || j < len(args.Entries) {
+		persistStateChanged = true
+	}
+	reply.XTerm = -1
+	reply.XIndex = len(rf.log)
 
 	reply.Success = true
 
@@ -92,7 +107,11 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntryArgs, reply *AppendEntryReply) {
-	if ok := rf.peers[server].Call("Raft.AppendEntries", args, reply); !ok {
+	ok := false
+	for nTry := 0; !ok && nTry < 5; ok, nTry = rf.peers[server].Call("Raft.AppendEntries", args, reply), nTry+1 {
+		time.Sleep(60 * time.Millisecond)
+	}
+	if !ok {
 		return
 	}
 
@@ -104,21 +123,23 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntryArgs, reply *Appe
 	}
 	if reply.Term > rf.currentTerm {
 		rf.convertToFollower(reply.Term)
+		rf.persist()
 		return
 	}
 
-	// Appending entries success or the follower's log is shorter than the leader's log
 	if reply.Success {
-		rf.nextIndex[server] = reply.NextIndex
-		rf.matchIndex[server] = reply.NextIndex - 1
-	} else if reply.ConflictTerm == -1 {
-		rf.nextIndex[server] = reply.NextIndex
+		// Appending entries success
+		rf.nextIndex[server] = reply.XIndex
+		rf.matchIndex[server] = reply.XIndex - 1
+	} else if reply.XTerm == -1 {
+		// log is too short
+		rf.nextIndex[server] = reply.XIndex
 	} else {
 		idx := args.PrevLogIndex
-		for ; idx > 0 && rf.log[idx].Term != reply.ConflictTerm; idx-- {
+		for ; idx > 0 && rf.log[idx].Term != reply.XTerm; idx-- {
 		}
 		if idx == 0 {
-			rf.nextIndex[server] = reply.NextIndex
+			rf.nextIndex[server] = reply.XIndex
 		} else {
 			rf.nextIndex[server] = idx + 1
 			rf.matchIndex[server] = idx
