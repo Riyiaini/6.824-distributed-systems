@@ -2,38 +2,23 @@ package raft
 
 import (
 	"time"
-
-	"6.5840/raftapi"
 )
 
 type AppendEntryArgs struct {
 	Term         int
 	LeaderId     int
 	PrevLogIndex int // index of log entry immediately preceding new ones
-	PrevLogtTerm int // term of PrevLogIndex entry
+	PrevLogTerm  int // term of PrevLogIndex entry
 	Entries      []logEntry
 	LeaderCommit int
 }
 type AppendEntryReply struct {
-	Term    int
-	XIndex  int
-	XTerm   int
-	Success bool
-}
-
-func (rf *Raft) applyLogEntry() {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
-	for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
-		msg := raftapi.ApplyMsg{
-			CommandValid: true,
-			Command:      rf.log[i].Command,
-			CommandIndex: i,
-		}
-		rf.applyCh <- msg
-		rf.lastApplied = i
-	}
+	Term       int
+	XIndex     int
+	XTerm      int
+	Success    bool
+	LastCommit int // last commit index in the follower's log, for leader to update its commitIndex
+	// must add this to pass test 2B
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
@@ -43,7 +28,7 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 	persistStateChanged := false
 	defer func() {
 		if persistStateChanged {
-			rf.persist()
+			rf.persist(nil)
 		}
 	}()
 
@@ -52,6 +37,10 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
 		return
+	}
+
+	if args.LeaderCommit < rf.commitIndex {
+		reply.LastCommit = rf.commitIndex
 	}
 
 	if args.Term > rf.currentTerm {
@@ -70,40 +59,53 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 		return
 	}
 
+	logIndex := rf.ToLogIndex(args.PrevLogIndex)
+	if logIndex < 0 {
+		// force leader to send snapshot
+		reply.XIndex = 0
+		reply.XTerm = -1
+		return
+	}
 	// follower's log conflicts with leader's at PrevLogIndex
-	if cfTerm := rf.log[args.PrevLogIndex].Term; cfTerm != args.PrevLogtTerm {
-		cfIndex := args.PrevLogIndex
-		for cfIndex > 0 && rf.log[cfIndex].Term == cfTerm {
-			cfIndex--
+	if cfTerm := rf.log[logIndex].Term; cfTerm != args.PrevLogTerm {
+		if logIndex == 0 {
+			// follower's last snapshot term conflicts with leader's at PrevLogIndex
+			// force leader to send snapshot
+			reply.XIndex = 0
+			reply.XTerm = -1
+			return
 		}
-		reply.XIndex = cfIndex + 1
+		for logIndex > 0 && rf.log[logIndex].Term == cfTerm {
+			logIndex--
+		}
+		reply.XIndex = rf.ToOriginalIndex(logIndex + 1)
 		reply.XTerm = cfTerm
 		return
 	}
 
 	// By this point, follower's log before PrevLogIndex is consistent with leader's
 
-	i, j := args.PrevLogIndex+1, 0
-	for ; i <= lastIndex && j < len(args.Entries); i, j = i+1, j+1 {
+	i, j := logIndex+1, 0
+	for ; i < len(rf.log) && j < len(args.Entries); i, j = i+1, j+1 {
 		if rf.log[i].Term != args.Entries[j].Term {
 			break
 		}
 	}
-	rf.log = rf.log[:i]
-	rf.log = append(rf.log, args.Entries[j:]...)
-	if i <= lastIndex || j < len(args.Entries) {
+	if i < len(rf.log) || j < len(args.Entries) {
 		persistStateChanged = true
 	}
+	rf.log = rf.log[:i]
+	rf.log = append(rf.log, args.Entries[j:]...)
+
 	reply.XTerm = -1
-	reply.XIndex = len(rf.log)
+	reply.XIndex = rf.ToOriginalIndex(len(rf.log))
 
 	reply.Success = true
 
 	if args.LeaderCommit > rf.commitIndex {
 		rf.commitIndex = min(args.LeaderCommit, rf.GetLastIndex())
+		rf.applyCond.Signal()
 	}
-
-	go rf.applyLogEntry()
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntryArgs, reply *AppendEntryReply) {
@@ -123,7 +125,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntryArgs, reply *Appe
 	}
 	if reply.Term > rf.currentTerm {
 		rf.convertToFollower(reply.Term)
-		rf.persist()
+		rf.persist(nil)
 		return
 	}
 
@@ -132,33 +134,39 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntryArgs, reply *Appe
 		rf.nextIndex[server] = reply.XIndex
 		rf.matchIndex[server] = reply.XIndex - 1
 	} else if reply.XTerm == -1 {
-		// log is too short
 		rf.nextIndex[server] = reply.XIndex
 	} else {
-		idx := args.PrevLogIndex
+		idx := rf.ToLogIndex(args.PrevLogIndex)
 		for ; idx > 0 && rf.log[idx].Term != reply.XTerm; idx-- {
 		}
 		if idx == 0 {
 			rf.nextIndex[server] = reply.XIndex
 		} else {
-			rf.nextIndex[server] = idx + 1
-			rf.matchIndex[server] = idx
+			rf.nextIndex[server] = rf.ToOriginalIndex(idx + 1)
+			rf.matchIndex[server] = rf.ToOriginalIndex(idx)
 		}
 	}
 
-	for n := rf.GetLastIndex(); n > rf.commitIndex; n-- {
+	commitIdx := rf.ToLogIndex(rf.commitIndex)
+	for n := len(rf.log) - 1; n > commitIdx; n-- {
 		count := 1
+		idx := rf.ToOriginalIndex(n)
 		if rf.log[n].Term == rf.currentTerm {
 			for i := range rf.peers {
-				if i != rf.me && rf.matchIndex[i] >= n {
+				if i != rf.me && rf.matchIndex[i] >= idx {
 					count++
 				}
 			}
 		}
 		if count > len(rf.peers)/2 {
-			rf.commitIndex = n
-			go rf.applyLogEntry()
-			break
+			rf.commitIndex = idx
+			rf.applyCond.Signal()
+			return
 		}
+	}
+
+	if rf.commitIndex < reply.LastCommit {
+		rf.commitIndex = reply.LastCommit
+		rf.applyCond.Signal()
 	}
 }

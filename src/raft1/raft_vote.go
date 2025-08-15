@@ -29,7 +29,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	persistStateChanged := false
 	defer func() {
 		if persistStateChanged {
-			rf.persist()
+			rf.persist(nil)
 		}
 	}()
 
@@ -101,7 +101,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	}
 	if reply.Term > rf.currentTerm {
 		rf.convertToFollower(reply.Term)
-		rf.persist()
+		rf.persist(nil)
 		return
 	}
 	if reply.VoteGranted {
