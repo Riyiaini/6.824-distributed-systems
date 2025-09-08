@@ -385,6 +385,7 @@ func (rf *Raft) ticker() {
 			}
 		}
 	}
+	close(rf.applyCh)
 }
 
 func (rf *Raft) applyLogEntry() {

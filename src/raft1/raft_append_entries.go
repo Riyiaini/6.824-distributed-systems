@@ -13,12 +13,10 @@ type AppendEntryArgs struct {
 	LeaderCommit int
 }
 type AppendEntryReply struct {
-	Term       int
-	XIndex     int
-	XTerm      int
-	Success    bool
-	LastCommit int // last commit index in the follower's log, for leader to update its commitIndex
-	// must add this to pass test 2B
+	Term    int
+	XIndex  int
+	XTerm   int
+	Success bool
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
@@ -37,10 +35,6 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
 		return
-	}
-
-	if args.LeaderCommit < rf.commitIndex {
-		reply.LastCommit = rf.commitIndex
 	}
 
 	if args.Term > rf.currentTerm {
@@ -139,7 +133,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntryArgs, reply *Appe
 		idx := rf.ToLogIndex(args.PrevLogIndex)
 		for ; idx > 0 && rf.log[idx].Term != reply.XTerm; idx-- {
 		}
-		if idx == 0 {
+		if idx == 0 || rf.ToOriginalIndex(idx) < reply.XIndex {
 			rf.nextIndex[server] = reply.XIndex
 		} else {
 			rf.nextIndex[server] = rf.ToOriginalIndex(idx + 1)
@@ -149,6 +143,10 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntryArgs, reply *Appe
 
 	commitIdx := rf.ToLogIndex(rf.commitIndex)
 	for n := len(rf.log) - 1; n > commitIdx; n-- {
+		// a leader cannot determine commitment using log entries from older terms. (figure 8)
+		if rf.log[n].Term < rf.currentTerm {
+			break
+		}
 		count := 1
 		idx := rf.ToOriginalIndex(n)
 		if rf.log[n].Term == rf.currentTerm {
@@ -165,8 +163,4 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntryArgs, reply *Appe
 		}
 	}
 
-	if rf.commitIndex < reply.LastCommit {
-		rf.commitIndex = reply.LastCommit
-		rf.applyCond.Signal()
-	}
 }

@@ -87,7 +87,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) {
 	ok := false
 	for nTry := 0; !ok && nTry < 5; ok, nTry = rf.peers[server].Call("Raft.RequestVote", args, reply), nTry+1 {
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(60 * time.Millisecond)
 	}
 	if !ok {
 		return

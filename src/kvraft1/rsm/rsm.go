@@ -1,25 +1,36 @@
 package rsm
 
 import (
+	"log"
 	"sync"
+	"time"
 
 	"6.5840/kvsrv1/rpc"
 	"6.5840/labrpc"
-	"6.5840/raft1"
+	raft "6.5840/raft1"
 	"6.5840/raftapi"
-	"6.5840/tester1"
-
+	tester "6.5840/tester1"
 )
 
 var useRaftStateMachine bool // to plug in another raft besided raft1
 
+type opType string
+
+const (
+	OpGet    opType = "Get"
+	OpPut    opType = "Put"
+	OpAppend opType = "Append"
+)
 
 type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+	Req      any
+	Rep      any
+	Index    int
+	SubmitId int
 }
-
 
 // A server (i.e., ../server.go) that wants to replicate itself calls
 // MakeRSM and must implement the StateMachine interface.  This
@@ -41,6 +52,7 @@ type RSM struct {
 	maxraftstate int // snapshot if log grows this big
 	sm           StateMachine
 	// Your definitions here.
+	appliedChs map[int]chan any
 }
 
 // servers[] contains the ports of the set of
@@ -64,17 +76,18 @@ func MakeRSM(servers []*labrpc.ClientEnd, me int, persister *tester.Persister, m
 		maxraftstate: maxraftstate,
 		applyCh:      make(chan raftapi.ApplyMsg),
 		sm:           sm,
+		appliedChs:   make(map[int]chan any),
 	}
 	if !useRaftStateMachine {
 		rsm.rf = raft.Make(servers, me, persister, rsm.applyCh)
 	}
+	go rsm.Reader()
 	return rsm
 }
 
 func (rsm *RSM) Raft() raftapi.Raft {
 	return rsm.rf
 }
-
 
 // Submit a command to Raft, and wait for it to be committed.  It
 // should return ErrWrongLeader if client should find new leader and
@@ -86,5 +99,86 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 	// is the argument to Submit and id is a unique id for the op.
 
 	// your code here
+	op := Op{Req: req, SubmitId: rsm.me}
+	index, _, isLeader := rsm.rf.Start(op)
+
+	if isLeader {
+		rsm.mu.Lock()
+		ch, _ := rsm.getChannel(index)
+		rsm.mu.Unlock()
+		defer func() {
+			rsm.mu.Lock()
+			close(ch)
+			delete(rsm.appliedChs, index)
+			rsm.mu.Unlock()
+		}()
+		time0 := time.Now()
+		for time.Since(time0).Seconds() < 5 {
+			select {
+			case rep := <-ch:
+				switch req.(type) {
+				case Inc:
+					if _, ok := rep.(*IncRep); ok {
+						return rpc.OK, rep
+					}
+				case Null:
+					if _, ok := rep.(*NullRep); ok {
+						return rpc.OK, rep
+					}
+				}
+
+			case <-time.After(30 * time.Millisecond):
+				_, isLeader := rsm.rf.GetState()
+				if !isLeader {
+					return rpc.ErrWrongLeader, nil
+				}
+			}
+		}
+	}
 	return rpc.ErrWrongLeader, nil // i'm dead, try another server.
+}
+
+func (rsm *RSM) getChannel(index int) (chan any, bool) {
+	ch, ok := rsm.appliedChs[index]
+	if !ok {
+		rsm.appliedChs[index] = make(chan any, 1)
+		ch = rsm.appliedChs[index]
+	}
+
+	return ch, ok
+}
+
+func (rsm *RSM) SendToChannel(ch chan any, rep any) {
+	select {
+	case ch <- rep:
+	default:
+	}
+}
+
+func (rsm *RSM) Reader() {
+	for msg := range rsm.applyCh {
+		op, ok := msg.Command.(Op)
+		if !ok {
+			log.Fatalf("unexpected command type %T", msg.Command)
+		}
+
+		index := msg.CommandIndex
+		rep := rsm.sm.DoOp(op.Req)
+
+		if op.SubmitId != rsm.me {
+			continue
+		}
+
+		rsm.mu.Lock()
+		ch, exists := rsm.getChannel(index)
+		if !exists {
+			close(ch)
+			delete(rsm.appliedChs, index)
+			rsm.mu.Unlock()
+			continue
+		}
+		rsm.mu.Unlock()
+
+		rsm.SendToChannel(ch, rep)
+	}
 }
