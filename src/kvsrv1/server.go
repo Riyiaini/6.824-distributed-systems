@@ -67,10 +67,6 @@ func (kv *KVServer) Put(args *rpc.PutArgs, reply *rpc.PutReply) {
 
 	val, ok := kv.data[args.Key]
 	if !ok {
-		if _, ok = kv.data[args.Key]; ok {
-			reply.Err = rpc.ErrVersion
-			return
-		}
 		if args.Version == 0 {
 			kv.data[args.Key] = Value{value: args.Value, version: 1}
 			reply.Err = rpc.OK

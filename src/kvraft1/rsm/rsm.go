@@ -14,21 +14,11 @@ import (
 
 var useRaftStateMachine bool // to plug in another raft besided raft1
 
-type opType string
-
-const (
-	OpGet    opType = "Get"
-	OpPut    opType = "Put"
-	OpAppend opType = "Append"
-)
-
 type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
 	Req      any
-	Rep      any
-	Index    int
 	SubmitId int
 }
 
@@ -52,7 +42,8 @@ type RSM struct {
 	maxraftstate int // snapshot if log grows this big
 	sm           StateMachine
 	// Your definitions here.
-	appliedChs map[int]chan any
+	appliedChs   map[int]chan any
+	lastSnapshot int
 }
 
 // servers[] contains the ports of the set of
@@ -77,6 +68,7 @@ func MakeRSM(servers []*labrpc.ClientEnd, me int, persister *tester.Persister, m
 		applyCh:      make(chan raftapi.ApplyMsg),
 		sm:           sm,
 		appliedChs:   make(map[int]chan any),
+		lastSnapshot: 0,
 	}
 	if !useRaftStateMachine {
 		rsm.rf = raft.Make(servers, me, persister, rsm.applyCh)
@@ -100,6 +92,7 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 
 	// your code here
 	op := Op{Req: req, SubmitId: rsm.me}
+
 	index, _, isLeader := rsm.rf.Start(op)
 
 	if isLeader {
@@ -116,18 +109,9 @@ func (rsm *RSM) Submit(req any) (rpc.Err, any) {
 		for time.Since(time0).Seconds() < 5 {
 			select {
 			case rep := <-ch:
-				switch req.(type) {
-				case Inc:
-					if _, ok := rep.(*IncRep); ok {
-						return rpc.OK, rep
-					}
-				case Null:
-					if _, ok := rep.(*NullRep); ok {
-						return rpc.OK, rep
-					}
-				}
+				return rpc.OK, rep
 
-			case <-time.After(30 * time.Millisecond):
+			case <-time.After(500 * time.Millisecond):
 				_, isLeader := rsm.rf.GetState()
 				if !isLeader {
 					return rpc.ErrWrongLeader, nil
@@ -148,37 +132,39 @@ func (rsm *RSM) getChannel(index int) (chan any, bool) {
 	return ch, ok
 }
 
-func (rsm *RSM) SendToChannel(ch chan any, rep any) {
-	select {
-	case ch <- rep:
-	default:
-	}
-}
-
 func (rsm *RSM) Reader() {
 	for msg := range rsm.applyCh {
-		op, ok := msg.Command.(Op)
-		if !ok {
-			log.Fatalf("unexpected command type %T", msg.Command)
-		}
+		if msg.CommandValid {
+			op := msg.Command.(Op)
+			index := msg.CommandIndex
+			rep := rsm.sm.DoOp(op.Req)
 
-		index := msg.CommandIndex
-		rep := rsm.sm.DoOp(op.Req)
+			if index-rsm.lastSnapshot >= rsm.maxraftstate {
+				println("take snapshot")
+				rsm.lastSnapshot = index
+				snapshot := rsm.sm.Snapshot()
+				rsm.rf.Snapshot(index, snapshot)
+			}
 
-		if op.SubmitId != rsm.me {
-			continue
-		}
+			if op.SubmitId != rsm.me {
+				continue
+			}
 
-		rsm.mu.Lock()
-		ch, exists := rsm.getChannel(index)
-		if !exists {
-			close(ch)
-			delete(rsm.appliedChs, index)
+			rsm.mu.Lock()
+			ch, exists := rsm.getChannel(index)
+			if !exists {
+				close(ch)
+				delete(rsm.appliedChs, index)
+				rsm.mu.Unlock()
+				continue
+			}
 			rsm.mu.Unlock()
-			continue
-		}
-		rsm.mu.Unlock()
 
-		rsm.SendToChannel(ch, rep)
+			ch <- rep
+		} else if msg.SnapshotValid {
+			rsm.sm.Restore(msg.Snapshot)
+		} else {
+			log.Fatal("InValid apply message")
+		}
 	}
 }

@@ -1,20 +1,22 @@
 package kvraft
 
 import (
-	"6.5840/kvsrv1/rpc"
-	"6.5840/kvtest1"
-	"6.5840/tester1"
-)
+	"time"
 
+	"6.5840/kvsrv1/rpc"
+	kvtest "6.5840/kvtest1"
+	tester "6.5840/tester1"
+)
 
 type Clerk struct {
 	clnt    *tester.Clnt
 	servers []string
 	// You will have to modify this struct.
+	lastLeader int
 }
 
 func MakeClerk(clnt *tester.Clnt, servers []string) kvtest.IKVClerk {
-	ck := &Clerk{clnt: clnt, servers: servers}
+	ck := &Clerk{clnt: clnt, servers: servers, lastLeader: 0}
 	// You'll have to add code here.
 	return ck
 }
@@ -32,7 +34,21 @@ func MakeClerk(clnt *tester.Clnt, servers []string) kvtest.IKVClerk {
 func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 
 	// You will have to modify this function.
-	return "", 0, ""
+	args := rpc.GetArgs{Key: key}
+	reply := rpc.GetReply{}
+	for {
+		for srv := range ck.servers {
+			ok := ck.clnt.Call(ck.servers[srv], "KVServer.Get", &args, &reply)
+			if ok {
+				if reply.Err == rpc.ErrWrongLeader {
+					continue
+				} else {
+					return reply.Value, reply.Version, reply.Err
+				}
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // Put updates key with value only if the version in the
@@ -52,7 +68,32 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 // The types of args and reply (including whether they are pointers)
 // must match the declared types of the RPC handler function's
 // arguments. Additionally, reply must be passed as a pointer.
+
 func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 	// You will have to modify this function.
-	return ""
+	args := rpc.PutArgs{Key: key, Value: value, Version: version}
+	reply := rpc.PutReply{}
+
+	// log.Println("Clerk Put", key, value, version)
+	lastLeader := ck.lastLeader
+	numServers := len(ck.servers)
+	retry := false
+	for {
+		for srv := range numServers {
+			idx := (srv + lastLeader) % numServers
+			ok := ck.clnt.Call(ck.servers[idx], "KVServer.Put", &args, &reply)
+			if ok {
+				if reply.Err == rpc.ErrWrongLeader {
+					continue
+				}
+				ck.lastLeader = idx
+				if reply.Err == rpc.ErrVersion && retry {
+					return rpc.ErrMaybe
+				}
+				return reply.Err
+			}
+		}
+		retry = true
+		time.Sleep(100 * time.Millisecond)
+	}
 }

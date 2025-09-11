@@ -9,7 +9,7 @@ import (
 
 	"6.5840/kvraft1/rsm"
 	"6.5840/kvsrv1/rpc"
-	"6.5840/kvtest1"
+	kvtest "6.5840/kvtest1"
 	tester "6.5840/tester1"
 )
 
@@ -165,6 +165,7 @@ func (ts *Test) GenericTestSpeed() {
 func TestBasic4B(t *testing.T) {
 	ts := MakeTest(t, "4B basic", 1, 5, true, false, false, -1, false)
 	tester.AnnotateTest("TestBasic4B", ts.nservers)
+	time.Sleep(1000 * time.Millisecond)
 	ts.GenericTest()
 }
 

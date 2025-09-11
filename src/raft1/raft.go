@@ -70,6 +70,7 @@ type Raft struct {
 	heartbeatCh chan struct{}
 	convertCh   chan struct{}
 	winElectCh  chan struct{} // channel to notify when state changes to Leader
+	broadcastCh chan struct{}
 	applyCond   *sync.Cond
 	voteCount   int
 
@@ -104,6 +105,7 @@ func (rf *Raft) persist(snapshot []byte) {
 	e.Encode(rf.log)
 	e.Encode(rf.lastSnapshotIndex)
 	raftstate := w.Bytes()
+	println("len(raftstate)", len(raftstate), "len(rf.log)", len(rf.log))
 	rf.persister.Save(raftstate, snapshot)
 }
 
@@ -328,6 +330,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	/* DPrintf("peer %d: Start command %v at index %d, term %d", rf.me, command, rf.GetLastIndex(), term)
 	DPrintf("%v", rf.log) */
+	// rf.sendToChannel(rf.broadcastCh) // notify heartbeat goroutine to send AppendEntries immediately
 
 	return rf.GetLastIndex(), term, true
 }
@@ -368,6 +371,10 @@ func (rf *Raft) ticker() {
 				rf.mu.Lock()
 				rf.broadcastHeartbeat()
 				rf.mu.Unlock()
+			case <-rf.broadcastCh:
+				rf.mu.Lock()
+				rf.broadcastHeartbeat()
+				rf.mu.Unlock()
 			}
 		case Follower:
 			select {
@@ -385,7 +392,6 @@ func (rf *Raft) ticker() {
 			}
 		}
 	}
-	close(rf.applyCh)
 }
 
 func (rf *Raft) applyLogEntry() {
@@ -430,6 +436,7 @@ func (rf *Raft) applyLogEntry() {
 		rf.lastApplied = max(rf.lastApplied, rf.commitIndex)
 		rf.mu.Unlock()
 	}
+	close(rf.applyCh)
 }
 
 // the service or tester wants to create a Raft server. the ports
@@ -460,6 +467,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		heartbeatCh:       make(chan struct{}),
 		convertCh:         make(chan struct{}),
 		winElectCh:        make(chan struct{}),
+		broadcastCh:       make(chan struct{}),
 		voteCount:         0,
 		dead:              0,
 		snapshotBuffer:    make([]byte, 0),

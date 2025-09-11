@@ -8,7 +8,7 @@ import (
 	"6.5840/labgob"
 	"6.5840/labrpc"
 	"6.5840/raftapi"
-	"6.5840/tester1"
+	tester "6.5840/tester1"
 )
 
 type Inc struct {
@@ -48,6 +48,7 @@ func makeRsmSrv(ts *Test, srv int, ends []*labrpc.ClientEnd, persister *tester.P
 		me: srv,
 	}
 	s.rsm = MakeRSM(ends, srv, persister, ts.maxraftstate, s)
+
 	return s
 }
 

@@ -2,15 +2,15 @@ package rsm
 
 import (
 	//"log"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
-	"fmt"
 
 	"6.5840/kvsrv1/rpc"
 	"6.5840/labrpc"
 	"6.5840/raftapi"
-	"6.5840/tester1"
+	tester "6.5840/tester1"
 )
 
 type Test struct {
@@ -77,11 +77,12 @@ func (ts *Test) onePartition(p []int, req any) any {
 				s := ts.srvs[index]
 				if s.rsm != nil && inPartition(index, p) {
 					err, rep := s.rsm.Submit(req)
+					// log.Printf("Submit to %d err=%v", index, err)
 					if err == rpc.OK {
 						ts.mu.Lock()
 						ts.leader = index
 						ts.mu.Unlock()
-						//log.Printf("leader = %d", ts.leader)
+						// log.Printf("leader = %d", ts.leader)
 						return rep
 					}
 				}
@@ -89,7 +90,7 @@ func (ts *Test) onePartition(p []int, req any) any {
 			index = (index + 1) % len(ts.srvs)
 		}
 		time.Sleep(50 * time.Millisecond)
-		//log.Printf("try again: no leader")
+		// log.Printf("try again: no leader")
 	}
 	return nil
 }
