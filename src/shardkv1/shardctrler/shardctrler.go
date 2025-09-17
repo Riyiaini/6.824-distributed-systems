@@ -62,7 +62,7 @@ func (sck *ShardCtrler) ChangeConfigTo(new *shardcfg.ShardConfig) {
 	oldCfg, v, _ := sck.Get("config")
 
 	old := shardcfg.FromString(oldCfg)
-	if old.Num > new.Num {
+	if old.Num >= new.Num {
 		panic("ChangeConfigTo: config number too old")
 	}
 
