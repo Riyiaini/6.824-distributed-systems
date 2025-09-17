@@ -40,6 +40,12 @@ func MakeShardCtrler(clnt *tester.Clnt) *ShardCtrler {
 // controller. In part A, this method doesn't need to do anything. In
 // B and C, this method implements recovery.
 func (sck *ShardCtrler) InitController() {
+	backupCfg, _, err := sck.Get("backup-config")
+	if err == rpc.ErrNoKey {
+		return
+	}
+	cfg := shardcfg.FromString(backupCfg)
+	sck.ChangeConfigTo(cfg)
 }
 
 // Called once by the tester to supply the first configuration.  You
@@ -63,8 +69,11 @@ func (sck *ShardCtrler) ChangeConfigTo(new *shardcfg.ShardConfig) {
 
 	old := shardcfg.FromString(oldCfg)
 	if old.Num >= new.Num {
-		panic("ChangeConfigTo: config number too old")
+		return
 	}
+
+	_, ver, _ := sck.Get("backup-config")
+	sck.Put("backup-config", new.String(), ver)
 
 	for s, g := range old.Shards {
 		if new.Shards[s] != g {

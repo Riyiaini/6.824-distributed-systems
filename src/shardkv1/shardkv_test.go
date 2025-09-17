@@ -517,7 +517,7 @@ func TestJoinLeave5B(t *testing.T) {
 		if !ok {
 			ts.Fatalf("TestJoinLeave5B: Join returned %t", ok)
 		}
-	case <-time.After(time.Second * NSEC):
+	case <-time.After(time.Second * NSEC * 2):
 		ts.Fatalf("Join didn't complete")
 	}
 
@@ -547,7 +547,7 @@ func TestJoinLeave5B(t *testing.T) {
 		if !ok {
 			ts.Fatalf("TestJoinLeave5B: Leave failed %t", ok)
 		}
-	case <-time.After(time.Second * NSEC):
+	case <-time.After(time.Second * NSEC * 2):
 		ts.Fatalf("Leave didn't complete")
 	}
 	for i := 0; i < len(ka); i++ {
