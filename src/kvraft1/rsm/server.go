@@ -48,6 +48,7 @@ func makeRsmSrv(ts *Test, srv int, ends []*labrpc.ClientEnd, persister *tester.P
 		me: srv,
 	}
 	s.rsm = MakeRSM(ends, srv, persister, ts.maxraftstate, s)
+	s.Restore(persister.ReadSnapshot())
 
 	return s
 }
@@ -78,6 +79,9 @@ func (rs *rsmSrv) Snapshot() []byte {
 }
 
 func (rs *rsmSrv) Restore(data []byte) {
+	if data == nil || len(data) < 1 { // bootstrap without any state?
+		return
+	}
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 	if d.Decode(&rs.counter) != nil {

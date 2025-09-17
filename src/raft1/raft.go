@@ -105,7 +105,6 @@ func (rf *Raft) persist(snapshot []byte) {
 	e.Encode(rf.log)
 	e.Encode(rf.lastSnapshotIndex)
 	raftstate := w.Bytes()
-	println("len(raftstate)", len(raftstate), "len(rf.log)", len(rf.log))
 	rf.persister.Save(raftstate, snapshot)
 }
 

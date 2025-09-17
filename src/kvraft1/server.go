@@ -54,7 +54,6 @@ func (kv *KVServer) DoOp(req any) any {
 		return reply
 	case rpc.PutArgs:
 		var reply rpc.PutReply
-		//fmt.Printf("me:%d %s %s %d\n", kv.me, req.Key, req.Value, req.Version)
 		kv.mu.Lock()
 		defer kv.mu.Unlock()
 
@@ -66,24 +65,19 @@ func (kv *KVServer) DoOp(req any) any {
 					Version: 1,
 				}
 				reply.Err = rpc.OK
-				//println("1ok")
 			} else {
 				reply.Err = rpc.ErrNoKey
-				//println("nokey")
 			}
 		} else {
 			oVersion := entry.Version
 			if req.Version != oVersion {
-				// log.Println("version mismatch", req.Key, "have", oVersion, "want", req.Version)
 				reply.Err = rpc.ErrVersion
-				//println("version")
 			} else {
 				kv.KV[req.Key] = KVEntry{
 					Value:   req.Value,
 					Version: oVersion + 1,
 				}
 				reply.Err = rpc.OK
-				//println("2ok")
 			}
 		}
 		return reply

@@ -36,13 +36,16 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 	// You will have to modify this function.
 	args := rpc.GetArgs{Key: key}
 	reply := rpc.GetReply{}
+	numServer := len(ck.servers)
 	for {
-		for srv := range ck.servers {
-			ok := ck.clnt.Call(ck.servers[srv], "KVServer.Get", &args, &reply)
+		for srv := range numServer {
+			idx := (srv + ck.lastLeader) % numServer
+			ok := ck.clnt.Call(ck.servers[idx], "KVServer.Get", &args, &reply)
 			if ok {
 				if reply.Err == rpc.ErrWrongLeader {
 					continue
 				} else {
+					ck.lastLeader = idx
 					return reply.Value, reply.Version, reply.Err
 				}
 			}
@@ -75,12 +78,11 @@ func (ck *Clerk) Put(key string, value string, version rpc.Tversion) rpc.Err {
 	reply := rpc.PutReply{}
 
 	// log.Println("Clerk Put", key, value, version)
-	lastLeader := ck.lastLeader
-	numServers := len(ck.servers)
 	retry := false
+	numServer := len(ck.servers)
 	for {
-		for srv := range numServers {
-			idx := (srv + lastLeader) % numServers
+		for srv := range numServer {
+			idx := (srv + ck.lastLeader) % numServer
 			ok := ck.clnt.Call(ck.servers[idx], "KVServer.Put", &args, &reply)
 			if ok {
 				if reply.Err == rpc.ErrWrongLeader {

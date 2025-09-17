@@ -140,7 +140,6 @@ func (rsm *RSM) Reader() {
 			rep := rsm.sm.DoOp(op.Req)
 
 			if index-rsm.lastSnapshot >= rsm.maxraftstate {
-				println("take snapshot")
 				rsm.lastSnapshot = index
 				snapshot := rsm.sm.Snapshot()
 				rsm.rf.Snapshot(index, snapshot)
