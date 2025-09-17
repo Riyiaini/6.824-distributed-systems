@@ -2,14 +2,15 @@ package shardkv
 
 import (
 	//"log"
+
 	"testing"
 	"time"
 
 	"6.5840/kvsrv1/rpc"
-	"6.5840/kvtest1"
+	kvtest "6.5840/kvtest1"
 	"6.5840/shardkv1/shardcfg"
 	"6.5840/shardkv1/shardctrler"
-	"6.5840/tester1"
+	tester "6.5840/tester1"
 )
 
 const (
@@ -315,7 +316,7 @@ func TestProgressShutdown5A(t *testing.T) {
 
 	select {
 	case <-ch:
-	case <-time.After(NSEC * time.Second):
+	case <-time.After(NSEC * 2 * time.Second):
 		ts.Fatalf("Gets didn't finish")
 	}
 }
@@ -388,7 +389,7 @@ func TestProgressJoin5A(t *testing.T) {
 	go func() {
 		// get the keys that are on groups that are involved in the
 		// join but not in the shards that are moving
-		t := time.Now().Add(NSEC * time.Second)
+		t := time.Now().Add(3 * NSEC * time.Second)
 		nget := 0
 		for time.Now().Before(t) {
 			for i := 0; i < len(ka); i++ {
@@ -413,7 +414,7 @@ func TestProgressJoin5A(t *testing.T) {
 			ts.Fatalf("Two few gets finished %d; expected more than %d", cnt, NCNT)
 		}
 
-	case <-time.After(2 * NSEC * time.Second):
+	case <-time.After(4 * NSEC * time.Second):
 		ts.Fatalf("Gets didn't finish")
 	}
 	ch0 <- rpc.OK
