@@ -103,9 +103,10 @@ func (rf *Raft) AppendEntries(args *AppendEntryArgs, reply *AppendEntryReply) {
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntryArgs, reply *AppendEntryReply) {
-	ok := false
-	for nTry := 0; !ok && nTry < 5; ok, nTry = rf.peers[server].Call("Raft.AppendEntries", args, reply), nTry+1 {
+	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+	for nTry := 0; !ok && nTry < 5; nTry++ {
 		time.Sleep(60 * time.Millisecond)
+		ok = rf.peers[server].Call("Raft.AppendEntries", args, reply)
 	}
 	if !ok {
 		return

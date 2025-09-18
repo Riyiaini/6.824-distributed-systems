@@ -329,7 +329,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	/* DPrintf("peer %d: Start command %v at index %d, term %d", rf.me, command, rf.GetLastIndex(), term)
 	DPrintf("%v", rf.log) */
-	// rf.sendToChannel(rf.broadcastCh) // notify heartbeat goroutine to send AppendEntries immediately
+	rf.sendToChannel(rf.broadcastCh) // notify heartbeat goroutine to send AppendEntries immediately
 
 	return rf.GetLastIndex(), term, true
 }

@@ -85,9 +85,10 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 // that the caller passes the address of the reply struct with &, not
 // the struct itself.
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) {
-	ok := false
-	for nTry := 0; !ok && nTry < 5; ok, nTry = rf.peers[server].Call("Raft.RequestVote", args, reply), nTry+1 {
+	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
+	for nTry := 0; !ok && nTry < 5; nTry++ {
 		time.Sleep(60 * time.Millisecond)
+		ok = rf.peers[server].Call("Raft.RequestVote", args, reply)
 	}
 	if !ok {
 		return

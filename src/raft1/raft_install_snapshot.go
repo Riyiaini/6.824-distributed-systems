@@ -80,9 +80,10 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 }
 
 func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
-	ok := false
-	for nTry := 0; !ok && nTry < 5; ok, nTry = rf.peers[server].Call("Raft.InstallSnapshot", args, reply), nTry+1 {
+	ok := rf.peers[server].Call("Raft.InstallSnapshot", args, reply)
+	for nTry := 0; !ok && nTry < 5; nTry++ {
 		time.Sleep(60 * time.Millisecond)
+		rf.peers[server].Call("Raft.InstallSnapshot", args, reply)
 	}
 	if !ok {
 		return
