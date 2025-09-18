@@ -5,7 +5,6 @@ package shardctrler
 //
 
 import (
-	"sync"
 	"sync/atomic"
 
 	kvsrv "6.5840/kvsrv1"
@@ -24,7 +23,6 @@ type ShardCtrler struct {
 	killed int32 // set by Kill()
 
 	// Your data here.
-	mu sync.Mutex
 }
 
 // Make a ShardCltler, which stores its state in a kvsrv.

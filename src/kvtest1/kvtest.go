@@ -3,6 +3,7 @@ package kvtest
 import (
 	"encoding/json"
 	"fmt"
+
 	//"log"
 	"math/rand"
 	"strconv"
@@ -10,7 +11,7 @@ import (
 	"time"
 
 	"6.5840/kvsrv1/rpc"
-	"6.5840/tester1"
+	tester "6.5840/tester1"
 )
 
 // The tester generously allows solutions to complete elections in one second
@@ -297,9 +298,11 @@ func (ts *Test) SpreadPutsSize(ck IKVClerk, n, valsz int) ([]string, []string) {
 	for i := 0; i < n; i++ {
 		va[i] = tester.Randstring(valsz)
 		ck.Put(ka[i], va[i], rpc.Tversion(0))
+		// println("Put", ka[i], va[i])
 	}
 	for i := 0; i < n; i++ {
 		ts.CheckGet(ck, ka[i], va[i], rpc.Tversion(1))
+		// println("Get", ka[i], va[i])
 	}
 	return ka, va
 }

@@ -10,14 +10,14 @@ import (
 	"time"
 
 	"6.5840/kvraft1/rsm"
-	"6.5840/kvsrv1"
+	kvsrv "6.5840/kvsrv1"
 	"6.5840/kvsrv1/rpc"
-	"6.5840/kvtest1"
+	kvtest "6.5840/kvtest1"
 	"6.5840/labrpc"
 	"6.5840/shardkv1/shardcfg"
 	"6.5840/shardkv1/shardctrler"
 	"6.5840/shardkv1/shardgrp"
-	"6.5840/tester1"
+	tester "6.5840/tester1"
 )
 
 type Test struct {
@@ -357,24 +357,26 @@ func (ts *Test) concurCtrler(ck kvtest.IKVClerk, ka, va []string) {
 	)
 
 	ch := make(chan struct{})
+	var id int32 = 0
 	f := func(ch chan struct{}, i int) {
-		for true {
+		for {
 			select {
 			case <-ch:
 				return
 			default:
+				sckid := atomic.AddInt32(&id, 1)
 				ngid := ts.newGid()
 				sck := ts.makeShardCtrler()
 				sck.InitController()
-				//log.Printf("%v: electCtrler %d join/leave %v", sck.Id(), i, ngid)
+				// log.Printf("%v: electCtrler %d join/leave %v", sckid, i, ngid)
 				ts.joinGroups(sck, []tester.Tgid{ngid})
 				if ok := ts.checkMember(sck, ngid); ok {
-					//log.Printf("%v: electCtrler %d leave %d", sck.Id(), i, ngid)
+					// log.Printf("%v: electCtrler %d leave %d", sckid, i, ngid)
 					if ok := ts.leaveGroups(sck, []tester.Tgid{ngid}); !ok {
-						//log.Printf("%v: electCtrler %d leave %v failed", sck.Id(), i, ngid)
+						log.Printf("%v: electCtrler %d leave %v failed", sckid, i, ngid)
 					}
 				} else {
-					//log.Printf("%v: electCtrler %d join %v failed", sck.Id(), i, ngid)
+					log.Printf("%v: electCtrler %d join %v failed", sckid, i, ngid)
 				}
 			}
 		}
